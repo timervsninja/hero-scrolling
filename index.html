@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>4K Scrolling Hero — seedace 2.0</title>
+
+<!-- KaTeX: render LaTeX math in the browser, no build step -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css"
+      integrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous" />
+
+<style>
+  /* ---------- Design tokens ---------- */
+  :root {
+    --bg-0: #0a0e1a;
+    --accent: #ffb703;
+    --accent-2: #fb8500;
+    --ink: #f8f9fa;
+    --ink-dim: #aeb6c4;
+    --fs-hero: clamp(2.5rem, 6vw + 1rem, 9rem);
+    --fs-sub:  clamp(1rem, 1.6vw + .5rem, 2.25rem);
+    --fs-body: clamp(.95rem, .9vw + .4rem, 1.5rem);
+    --space:   clamp(1rem, 4vw, 7rem);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg-0);
+    color: var(--ink);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+
+  /* ---------- Hero ---------- */
+  .hero {
+    position: relative;
+    height: 100vh;
+    height: 100svh;
+    min-height: 600px;
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+    isolation: isolate;
+  }
+
+  /* three.js animated layer — wireframe terrain + particles.
+     Sits BEHIND the video (z-index -3). Procedural, so it stays crisp at 4K. */
+  #bg-canvas {
+    position: fixed;
+    inset: 0;
+    z-index: -3;
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  /* Full-bleed looping video background.
+     Fixed positioning pins the video to the viewport so the hero content
+     and the sections below scroll *over* it — the canonical
+     "scrolling hero" effect (pattern confirmed against well-built
+     open-source video-hero landing pages).
+     NOTE: this demo asset is 1280x720. For a true 4K hero, replace
+     hero-bg.mp4 with a 3840x2160 file (or add a <source> for it). */
+  .hero__media {
+    position: fixed;
+    inset: 0;
+    z-index: -2;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;        /* fills the viewport, no letterboxing */
+    object-position: center;
+  }
+  /* Dark overlay so text stays readable over the video. */
+  .hero__overlay {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background:
+      linear-gradient(180deg, rgba(10,14,26,.55) 0%, rgba(10,14,26,.25) 40%, rgba(10,14,26,.7) 100%);
+  }
+
+  .hero__content {
+    position: relative;
+    text-align: center;
+    padding: 0 var(--space);
+    max-width: 1400px;
+    text-shadow: 0 2px 30px rgba(0,0,0,.5);
+  }
+  .hero__eyebrow {
+    letter-spacing: .35em;
+    text-transform: uppercase;
+    font-size: var(--fs-body);
+    color: var(--accent);
+    margin: 0 0 .6em;
+  }
+  .hero h1 {
+    font-size: var(--fs-hero);
+    line-height: 1.02;
+    margin: 0 0 .4em;
+    font-weight: 800;
+    letter-spacing: -.02em;
+  }
+  .hero p {
+    font-size: var(--fs-sub);
+    color: var(--ink-dim);
+    margin: 0 auto 1.6em;
+    max-width: 40ch;
+  }
+  .cta {
+    display: inline-block;
+    padding: clamp(.8rem,1.2vw,1.4rem) clamp(1.6rem,3vw,3rem);
+    border-radius: 999px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: #1a1205;
+    font-weight: 700;
+    font-size: var(--fs-body);
+    text-decoration: none;
+    box-shadow: 0 10px 40px rgba(251,133,0,.35);
+    transition: transform .2s ease, box-shadow .2s ease;
+  }
+  .cta:hover { transform: translateY(-3px); box-shadow: 0 16px 50px rgba(251,133,0,.5); }
+
+  .scroll-indicator {
+    position: absolute;
+    bottom: clamp(1rem, 4vh, 3rem);
+    left: 50%;
+    transform: translateX(-50%);
+    color: var(--ink-dim);
+    font-size: .85rem;
+    letter-spacing: .25em;
+    text-transform: uppercase;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: .6rem;
+    opacity: .9;
+  }
+  .scroll-indicator .mouse {
+    width: 26px; height: 42px;
+    border: 2px solid var(--ink-dim);
+    border-radius: 14px;
+    position: relative;
+  }
+  .scroll-indicator .mouse::after {
+    content: "";
+    position: absolute;
+    left: 50%; top: 8px;
+    width: 4px; height: 8px;
+    background: var(--ink-dim);
+    border-radius: 2px;
+    transform: translateX(-50%);
+    animation: wheel 1.6s infinite;
+  }
+  @keyframes wheel { 0%{opacity:0;transform:translate(-50%,0)} 30%{opacity:1} 100%{opacity:0;transform:translate(-50%,14px)} }
+
+  /* ---------- Content sections ---------- */
+  main { position: relative; z-index: 1; background: var(--bg-0); }
+  .section {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: clamp(4rem, 12vh, 12rem) var(--space);
+  }
+  .section h2 {
+    font-size: var(--fs-sub);
+    margin: 0 0 1rem;
+    color: var(--accent);
+  }
+  .section p {
+    font-size: var(--fs-body);
+    line-height: 1.7;
+    color: var(--ink-dim);
+    max-width: 65ch;
+  }
+
+  .figure {
+    margin: clamp(2rem,6vh,5rem) 0 0;
+    border-radius: 18px;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,.08);
+    box-shadow: 0 20px 60px rgba(0,0,0,.45);
+    background: #0d1322;
+  }
+  .figure img {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 70vh;
+    object-fit: contain;
+  }
+
+  /* Math cards (KaTeX) */
+  .math-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: clamp(1rem, 2vw, 2rem);
+    margin-top: clamp(2rem, 5vh, 4rem);
+  }
+  .math-card {
+    background: #0d1322;
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 16px;
+    padding: clamp(1.2rem, 2.5vw, 2rem);
+    box-shadow: 0 12px 40px rgba(0,0,0,.35);
+  }
+  .math-card .label {
+    font-size: .8rem;
+    letter-spacing: .2em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 1rem;
+  }
+  .math-card .katex-display { margin: 0; color: var(--ink); }
+
+  /* Reveal animation */
+  .reveal {
+    opacity: 0;
+    transform: translateY(40px);
+    transition: opacity .8s ease, transform .8s ease;
+  }
+  .reveal.is-visible { opacity: 1; transform: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .reveal { opacity: 1; transform: none; transition: none; }
+    .scroll-indicator .mouse::after { animation: none; }
+  }
+
+  @media (min-width: 2560px) {
+    .section, .hero__content { max-width: 1800px; }
+  }
+</style>
+</head>
+<body>
+
+  <header class="hero">
+    <!-- Procedural 3D layer (three.js) -->
+    <canvas id="bg-canvas" aria-hidden="true"></canvas>
+
+    <!-- Looping background video. muted + playsinline are required for
+         autoplay on mobile. Poster shows before playback starts. -->
+    <video class="hero__media" autoplay muted loop playsinline
+           poster="narrow-path.png">
+      <source src="hero-bg.mp4" type="video/mp4" />
+    </video>
+    <div class="hero__overlay"></div>
+
+    <div class="hero__content">
+      <p class="hero__eyebrow">Built for the big screen</p>
+      <h1>Crafted in 4K</h1>
+      <p>A scrolling hero that stays razor-sharp on every display — from laptop to 3840px cinema panel.</p>
+      <a class="cta" href="#start">Explore</a>
+    </div>
+
+    <div class="scroll-indicator" aria-hidden="true">
+      <div class="mouse"></div>
+      <span>Scroll</span>
+    </div>
+  </header>
+
+  <main id="start">
+    <section class="section reveal">
+      <h2>A still from the climb</h2>
+      <p>The narrow path above is the still frame from our shoot. Drop a true 4K hero photo in here later — the figure frame will hold it crisply.</p>
+      <figure class="figure">
+        <img src="narrow-path.png" alt="A narrow path through the landscape" />
+      </figure>
+    </section>
+
+    <section class="section reveal">
+      <h2>Math, live</h2>
+      <p>The page renders real LaTeX in the browser with KaTeX — no images, resolution-independent, so equations stay sharp at any zoom or display size.</p>
+      <div class="math-grid">
+        <div class="math-card">
+          <div class="label">Euler's identity</div>
+          <div data-tex="e^{i\pi} + 1 = 0"></div>
+        </div>
+        <div class="math-card">
+          <div class="label">Gaussian</div>
+          <div data-tex="f(x) = \frac{1}{\sigma\sqrt{2\pi}} e^{-\frac{(x-\mu)^2}{2\sigma^2}}"></div>
+        </div>
+        <div class="math-card">
+          <div class="label">Schrödinger</div>
+          <div data-tex="i\hbar\frac{\partial}{\partial t}\Psi = \hat{H}\Psi"></div>
+        </div>
+        <div class="math-card">
+          <div class="label">Navier–Stokes</div>
+          <div data-tex="\rho\left(\frac{\partial \mathbf{v}}{\partial t} + \mathbf{v}\cdot\nabla\mathbf{v}\right) = -\nabla p + \mu\nabla^2\mathbf{v} + \mathbf{f}"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section reveal">
+      <h2>Fluid everything</h2>
+      <p>Typography and spacing use <code>clamp()</code> driven by viewport width, so headlines grow into the room on a 4K monitor instead of looking lost. Content is capped at a comfortable measure so it never stretches awkwardly wide.</p>
+    </section>
+
+    <section class="section reveal">
+      <h2>Smooth, on the main thread budget</h2>
+      <p>Scroll reveals are powered by <code>IntersectionObserver</code> — no scroll listeners, no jank. The 3D layer and video playback are GPU-accelerated and paused automatically by the browser when off-screen.</p>
+    </section>
+  </main>
+
+<!-- KaTeX -->
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"
+        integrity="sha384-XjKyOOlGwcjNTAIQHIpgOno0Hl1YQqzUOEleOLALmuqehneUG+vnGctmUb0ZY0l8" crossorigin="anonymous"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+        integrity="sha384-+VBxd3r6XgURycqtZ117nYw44OOcIax56Z4dCRWbxyPt0Koah1uHoK0o4+/RRE05" crossorigin="anonymous"></script>
+
+<!-- three.js (r128 global build, no modules needed) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<script>
+  // ============================================================
+  // three.js — animated wireframe terrain + starfield
+  // Sits behind the video. Procedural => infinitely crisp at 4K.
+  // ============================================================
+  (function () {
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const canvas = document.getElementById('bg-canvas');
+    if (!window.THREE || !canvas) return;
+
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x0a0e1a, 0.05);
+
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(0, 2.2, 7);
+    camera.lookAt(0, 0, 0);
+
+    // ---- Wireframe terrain (displaced plane) ----
+    const SEG = 48, SIZE = 20;
+    const geo = new THREE.PlaneGeometry(SIZE, SIZE, SEG, SEG);
+    geo.rotateX(-Math.PI / 2);
+    const base = geo.attributes.position.array.slice(); // store flat baseline
+    const mat = new THREE.MeshBasicMaterial({ color: 0x2a4a7a, wireframe: true, transparent: true, opacity: 0.45 });
+    const terrain = new THREE.Mesh(geo, mat);
+    terrain.position.y = -1.5;
+    scene.add(terrain);
+
+    // ---- Starfield ----
+    const starCount = 600;
+    const starPos = new Float32Array(starCount * 3);
+    for (let i = 0; i < starCount; i++) {
+      starPos[i*3]   = (Math.random() - 0.5) * 60;
+      starPos[i*3+1] = Math.random() * 30 - 2;
+      starPos[i*3+2] = (Math.random() - 0.5) * 60;
+    }
+    const starGeo = new THREE.BufferGeometry();
+    starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+    const starMat = new THREE.PointsMaterial({ color: 0xffb703, size: 0.08, transparent: true, opacity: 0.8 });
+    const stars = new THREE.Points(starGeo, starMat);
+    scene.add(stars);
+
+    // ---- Animate ----
+    const pos = geo.attributes.position;
+    let raf = null, running = true;
+
+    function wave(t) {
+      for (let i = 0; i < pos.count; i++) {
+        const x = base[i*3], z = base[i*3+2];
+        const y = Math.sin(x * 0.6 + t) * 0.4 + Math.cos(z * 0.5 + t * 0.8) * 0.4;
+        pos.setY(i, y);
+      }
+      pos.needsUpdate = true;
+    }
+
+    function frame(now) {
+      if (!running) return;
+      const t = now * 0.001;
+      wave(t);
+      terrain.rotation.y = t * 0.05;
+      stars.rotation.y = t * 0.01;
+      renderer.render(scene, camera);
+      raf = requestAnimationFrame(frame);
+    }
+
+    function start() { if (!raf && !reduceMotion) raf = requestAnimationFrame(frame); }
+    function stop()  { running = false; if (raf) cancelAnimationFrame(raf); raf = null; }
+
+    if (reduceMotion) {
+      wave(0); renderer.render(scene, camera); // single static frame
+    } else {
+      start();
+    }
+
+    // Pause 3D when hero is off-screen (save GPU)
+    if ('IntersectionObserver' in window) {
+      new IntersectionObserver((e) => {
+        if (e[0].isIntersecting) { running = true; start(); }
+        else stop();
+      }, { threshold: 0.05 }).observe(document.querySelector('.hero'));
+    }
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  })();
+
+  // ============================================================
+  // KaTeX — render the math cards
+  // ============================================================
+  function renderMath() {
+    if (!window.katex || !window.renderMathInElement) return;
+    document.querySelectorAll('[data-tex]').forEach((el) => {
+      try { katex.render(el.getAttribute('data-tex'), el, { throwOnError: false, displayMode: true }); }
+      catch (e) { /* leave unchanged on failure */ }
+    });
+  }
+  // KaTeX scripts are deferred; run after they load.
+  if (document.readyState === 'complete') renderMath();
+  else window.addEventListener('load', renderMath);
+
+  // ============================================================
+  // Scroll reveal
+  // ============================================================
+  const reveals = document.querySelectorAll('.reveal');
+  const reduceMotionRM = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if ('IntersectionObserver' in window && !reduceMotionRM) {
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (e.isIntersecting) { e.target.classList.add('is-visible'); io.unobserve(e.target); }
+      }
+    }, { threshold: 0.15 });
+    reveals.forEach((el) => io.observe(el));
+  } else {
+    reveals.forEach((el) => el.classList.add('is-visible'));
+  }
+
+  // Pause the hero video when the hero scrolls out of view (saves battery/CPU).
+  const video = document.querySelector('.hero__media');
+  if (video && 'IntersectionObserver' in window) {
+    const vio = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (e.isIntersecting) video.play().catch(() => {});
+        else video.pause();
+      }
+    }, { threshold: 0.1 });
+    vio.observe(document.querySelector('.hero'));
+  }
+</script>
+</body>
+</html>
